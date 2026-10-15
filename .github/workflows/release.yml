@@ -1,0 +1,45 @@
+name: Create a release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build the zip for"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    name: Build and upload appliance_tracker.zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Verify the manifest version matches the tag version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+        run: |
+          v=$(jq -er .version custom_components/appliance_tracker/manifest.json)
+          [ "v$v" = "$TAG" ] || [ "$v" = "$TAG" ] || { echo "manifest $v != tag $TAG"; exit 1; }
+
+      - name: Read zip filename from hacs.json
+        run: echo "ZIP_NAME=$(jq -er .filename hacs.json)" >> "$GITHUB_ENV"
+
+      - name: Create zip
+        run: |
+          cd custom_components/appliance_tracker
+          zip -r "../../$ZIP_NAME" . -x "*.pyc" "*/__pycache__/*"
+
+      - name: Upload Asset to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" "$ZIP_NAME" --clobber
